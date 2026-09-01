@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Delmet — POSEIDON 3x2 in AR</title>
+<script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; background: #0d1114; font-family: 'Segoe UI', Arial, sans-serif; }
+  header {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 2;
+    padding: 14px 18px; background: linear-gradient(#0d1114ee, #0d1114 60%, transparent);
+    color: #fff; display: flex; align-items: center; justify-content: space-between;
+  }
+  header .titolo { font-weight: 600; font-size: 15px; letter-spacing: .02em; }
+  header .sotto { font-size: 12px; color: #9aa5b1; margin-top: 2px; }
+  model-viewer {
+    width: 100%; height: 100%;
+    --poster-color: #0d1114;
+  }
+  .nota {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 2;
+    padding: 12px 18px 18px; color: #9aa5b1; font-size: 12px; text-align: center;
+    background: linear-gradient(transparent, #0d1114cc 40%, #0d1114);
+  }
+  .avviso {
+    position: fixed; inset: 0; z-index: 3; background: #0d1114; color: #fff;
+    display: flex; align-items: center; justify-content: center; text-align: center;
+    padding: 30px; font-size: 14px; line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="titolo">POSEIDON 3x2 — Cabina di decapaggio</div>
+    <div class="sotto">Delmet · Showroom AR (prototipo)</div>
+  </div>
+</header>
+
+<model-viewer
+  id="mv"
+  src="assets/poseidon.glb"
+  ios-src="assets/poseidon.usdz"
+  alt="Impianto POSEIDON 3x2 - cabina di decapaggio Delmet"
+  ar
+  ar-modes="scene-viewer quick-look"
+  ar-placement="floor"
+  ar-scale="fixed"
+  camera-controls
+  touch-action="pan-y"
+  shadow-intensity="1"
+  exposure="1"
+  environment-image="neutral"
+  poster="">
+  <button slot="ar-button" style="
+      position:absolute; bottom:64px; left:50%; transform:translateX(-50%);
+      background:#00A0DC; color:#fff; border:none; border-radius:24px;
+      padding:12px 22px; font-size:14px; font-weight:600; cursor:pointer;">
+    Visualizza nella tua officina
+  </button>
+</model-viewer>
+
+<div class="nota">
+  Su iPhone/iPad si apre Quick Look (AR Kit) · Su Android si apre Scene Viewer (AR Core) ·
+  Scala reale 1:1 — inquadra un'area libera sul pavimento
+</div>
+
+<script>
+  // Avviso se assets/poseidon.glb non è ancora stato caricato (prima esportazione)
+  document.getElementById('mv').addEventListener('error', () => {
+    const div = document.createElement('div');
+    div.className = 'avviso';
+    div.innerHTML = 'Il modello 3D non è ancora presente in <code>assets/poseidon.glb</code>.<br><br>'
+      + 'Esportalo dallo strumento in <code>/exporter/</code> e caricalo in questa cartella.';
+    document.body.appendChild(div);
+  });
+</script>
+
+</body>
+</html>
