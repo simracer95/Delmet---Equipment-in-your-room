@@ -2144,9 +2144,9 @@ function buildPoseidon() {
   const hy = base + H + .36, HH = .72, HW = W, ow = 1.9, ohh = .4;
   g.add(box('PO-cassonetto', .715, HH, HW, M.creamLit, fx - .2625, hy, 0));
   const frontLogo = new THREE.Mesh(new THREE.PlaneGeometry(1.65, .37),
-    new THREE.MeshStandardMaterial({ name: 'PO-logo-fronte', map: logoTexLight, transparent: true,
-      alphaTest: .35, color: 0x2b3033, emissive: 0x2b3033, emissiveIntensity: .05, emissiveMap: logoTexLight,
-      roughness: .5, metalness: 0, side: THREE.DoubleSide, depthWrite: false }));
+    new THREE.MeshStandardMaterial({ name: 'PO-logo-fronte', map: logoTexLight,
+      alphaTest: .35, color: 0xffffff, emissive: 0x2b3033, emissiveIntensity: .05, emissiveMap: logoTexLight,
+      roughness: .5, metalness: 0, side: THREE.DoubleSide }));
   frontLogo.name = 'PO-logo-delmet-fronte';
   PO_ANIM.logo = frontLogo.material;
   frontLogo.position.set(fx + .112, hy, 0); frontLogo.rotation.y = Math.PI / 2;
@@ -2166,7 +2166,7 @@ function buildPoseidon() {
   const ghieraMat = mat('oblo-ghiera', { color: 0xb5b0a1, metalness: .05, roughness: .45, side: THREE.DoubleSide });
   [-1, 1].forEach((k, i) => {
     // canna passante (tubo aperto) nello spessore della parete
-    [sz + .002, sz - t - .002].forEach((zp, j) => {
+    [sz + .006, sz - t - .006].forEach((zp, j) => {
       const ch = new THREE.Mesh(chiusuraGeo, chiusuraMat);
       ch.name = 'PO-oblo-chiusura-' + i + j;
       ch.position.set(hox, hoy, k * zp); ch.rotation.y = k > 0 ? 0 : Math.PI; g.add(ch);
@@ -2187,11 +2187,11 @@ function buildPoseidon() {
       const cor = new THREE.Mesh(new THREE.RingGeometry(.285, .385, 48),
         mat('oblo-cornice-esterna', { color: 0x8f8b7e, metalness: .12, roughness: .5, side: THREE.DoubleSide }));
       cor.name = 'PO-oblo-cornice-esterna-' + i;
-      cor.position.set(hox, hoy, k * (sz + .012)); cor.rotation.y = k > 0 ? 0 : Math.PI; g.add(cor);
+      cor.position.set(hox, hoy, k * (sz + .02)); cor.rotation.y = k > 0 ? 0 : Math.PI; g.add(cor);
       const bordo = new THREE.Mesh(new THREE.CylinderGeometry(.385, .385, .04, 48, 1, true),
         mat('oblo-cornice-esterna-bordo', { color: 0x8f8b7e, metalness: .12, roughness: .5, side: THREE.DoubleSide }));
       bordo.name = 'PO-oblo-cornice-bordo-' + i;
-      bordo.position.set(hox, hoy, k * (sz - .008)); bordo.rotation.x = Math.PI / 2; g.add(bordo);
+      bordo.position.set(hox, hoy, k * (sz - .015)); bordo.rotation.x = Math.PI / 2; g.add(bordo);
     }
     [[sz + .005, 1], [sz - t - .03, -1]].forEach((p, j) => {
       const ring = new THREE.Mesh(ringGeo, ringMat);
@@ -2206,6 +2206,12 @@ function buildPoseidon() {
       gh.position.set(hox, hoy, k * (p[0] + k * 0.004 * p[1])); gh.rotation.y = k > 0 ? 0 : Math.PI; g.add(gh);
     });
   });
+  { // luce interna dedicata: rende visibile l'interno guardando dagli oblò
+    const lucina = new THREE.PointLight(0xfff0d8, 1.1, 3.2, 2);
+    lucina.name = 'PO-oblo-luce-interna';
+    lucina.position.set(hox, hoy, 0);
+    g.add(lucina);
+  }
   const kx = 2.35, ky = cy - .1;
   g.add(box('PO-hmi-scatola', .68, .82, .2, M.white, kx, ky, sz + .1));
   g.add(box('PO-hmi-porta', .58, .72, .04, M.panelHi, kx, ky, sz + .21));
