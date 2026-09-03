@@ -598,15 +598,24 @@ async function apriVR(imp) {
   vrDolly.position.set(0, 0, 0);
 
   try {
-    // immersive-ar con hit-test: mostra la VOSTRA stanza vera (passthrough) e permette
-    // di appoggiare l'impianto sul pavimento reale, esattamente come l'AR da telefono
+    // 'local-floor' allineato al pavimento reale; richiedo anche 'bounded-floor' in modo
+    // che il sistema usi il confine dell'INTERA stanza già tracciata nelle impostazioni
+    // del visore, invece di improvvisarne uno nuovo (il "cerchio piccolo") per la sessione
+    vrRenderer.xr.setReferenceSpaceType('local-floor');
     const session = await navigator.xr.requestSession('immersive-ar', {
       requiredFeatures: ['hit-test'],
-      optionalFeatures: ['local-floor', 'dom-overlay'],
+      optionalFeatures: ['local-floor', 'bounded-floor', 'dom-overlay'],
       domOverlay: { root: vrOverlay }
     });
     session.addEventListener('end', () => vrOverlay.classList.remove('attiva'));
     await vrRenderer.xr.setSession(session);
+
+    // se il sistema ricalcola l'origine dello spazio (es. il visore ridefinisce il confine
+    // durante la sessione), la posizione salvata non è più valida: richiedo un nuovo
+    // piazzamento invece di lasciare l'impianto disallineato e apparentemente "sparito"
+    vrRenderer.xr.getReferenceSpace().addEventListener('reset', () => {
+      modelloPiazzato = false;
+    });
 
     // se il visore non offre passthrough reale (ambiente completamente virtuale),
     // mostro almeno un pavimento e una griglia di riferimento come ripiego
