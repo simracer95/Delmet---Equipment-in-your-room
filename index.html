@@ -163,10 +163,10 @@
     </button>
   </model-viewer>
 
-  <button id="btnVR">Visualizza in VR</button>
+  <button id="btnVR">Visualizza qui con il visore</button>
   <div id="suggerimentoVR">
-    Joystick sinistro: cammina · Impugnatura destra: afferra/sposta/ruota l'impianto · Punta col controller destro una parete vasca per vederci dentro
-    <br>Grilletto sinistro: animazione avanti · Impugnatura sinistra: animazione indietro · Click joystick sinistro: pausa
+    Inquadra il pavimento e tocca il grilletto: l'impianto si appoggia lì, nella tua stanza vera · Joystick sinistro: cammina · Impugnatura destra: afferra/sposta/ruota · Punta col controller destro una parete vasca per vederci dentro
+    <br>Grilletto sinistro: animazione avanti · Impugnatura sinistra: animazione indietro · Click joystick sinistro: pausa · Click joystick destro: riposiziona l'impianto altrove
   </div>
 
   <button id="btnParete">👁 Mostra interno vasca</button>
@@ -335,13 +335,17 @@ const vrClock = new THREE.Clock();
 const RE_PARETE_VR = /^(OY-vasca-parete-fronte|TP-vasca-\d+-lato-\d|TP-serbatoio-lato-\d|SH-vasca-[a-z]+-parete-[ab])$/;
 let vrPareti = [], vrPareteAttiva = null;
 
+// hit-test sul pavimento vero (passthrough): stesso principio dell'AR da telefono
+let reticolo, hitTestSource = null, hitTestSourceRichiesto = false, modelloPiazzato = false;
+let pavimentoVirtuale, grigliaVirtuale; // usati solo se il visore NON offre il passthrough
+
 function initVR() {
   if (vrReady) return;
 
   vrScene = new THREE.Scene();
   vrCamera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 60);
 
-  vrRenderer = new THREE.WebGLRenderer({ antialias: true });
+  vrRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   vrRenderer.setPixelRatio(window.devicePixelRatio);
   vrRenderer.setSize(window.innerWidth, window.innerHeight);
   vrRenderer.xr.enabled = true;
@@ -352,19 +356,33 @@ function initVR() {
   dirLight.position.set(3, 6, 2);
   vrScene.add(dirLight);
 
-  // pavimento di riferimento, per capire dove si trova l'impianto nello spazio virtuale
-  const pavimento = new THREE.Mesh(
+  // pavimento/griglia di riserva: si vedono SOLO se il visore non offre il passthrough
+  // (cioè se mostra un ambiente virtuale invece della vostra stanza vera)
+  pavimentoVirtuale = new THREE.Mesh(
     new THREE.PlaneGeometry(50, 50),
     new THREE.MeshStandardMaterial({ color: 0x1a2028, roughness: 1 })
   );
-  pavimento.rotation.x = -Math.PI / 2;
-  vrScene.add(pavimento);
-  vrScene.add(new THREE.GridHelper(50, 50, 0x3d4a5c, 0x232b36));
+  pavimentoVirtuale.rotation.x = -Math.PI / 2;
+  pavimentoVirtuale.visible = false;
+  vrScene.add(pavimentoVirtuale);
+  grigliaVirtuale = new THREE.GridHelper(50, 50, 0x3d4a5c, 0x232b36);
+  grigliaVirtuale.visible = false;
+  vrScene.add(grigliaVirtuale);
+
+  // reticolo di puntamento: indica dove verrà appoggiato l'impianto sul VOSTRO pavimento reale
+  reticolo = new THREE.Mesh(
+    new THREE.RingGeometry(0.18, 0.24, 32).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0x00A0DC })
+  );
+  reticolo.matrixAutoUpdate = false;
+  reticolo.visible = false;
+  vrScene.add(reticolo);
 
   vrModelGroup = new THREE.Group();
   vrScene.add(vrModelGroup);
 
-  // dolly: il "corpo" dell'utente in VR, spostabile col joystick sinistro
+  // dolly: il "corpo" dell'utente, spostabile col joystick sinistro (utile se l'impianto
+  // è più grande dell'area libera che avete davanti al visore)
   vrDolly = new THREE.Group();
   vrDolly.add(vrCamera);
   vrScene.add(vrDolly);
@@ -374,6 +392,7 @@ function initVR() {
   [controllerDx, controllerSx].forEach(c => {
     c.addEventListener('connected', (e) => { c.userData.handedness = e.data.handedness; });
     c.addEventListener('disconnected', () => { c.userData.handedness = null; });
+    c.addEventListener('select', () => piazzaSulReticolo());
   });
   vrDolly.add(controllerDx, controllerSx);
 
@@ -381,14 +400,21 @@ function initVR() {
     return [controllerDx, controllerSx].find(c => c.userData.handedness === hand) || null;
   }
 
-  // stato per "afferrare" l'impianto con la mano destra (grip)
+  function piazzaSulReticolo() {
+    if (!reticolo.visible) return;
+    vrModelGroup.position.setFromMatrixPosition(reticolo.matrix);
+    vrModelGroup.position.y = 0; // sempre ancorato al pavimento, mai sospeso
+    vrModelGroup.quaternion.identity();
+    modelloPiazzato = true;
+  }
+
+  // stato per "afferrare" l'impianto con la mano destra (grip), per aggiustarlo dopo averlo piazzato
   let sto_afferrando = false;
   const presa = {
     controllerPos: new THREE.Vector3(), controllerQuat: new THREE.Quaternion(),
     modelPos: new THREE.Vector3(), modelQuat: new THREE.Quaternion(),
   };
 
-  // stato precedente dei pulsanti sinistri, per rilevare "appena premuto" (fronte di salita)
   const prevSx = { trigger: false, grip: false, stick: false };
   const rayVR = new THREE.Raycaster();
   const origineRay = new THREE.Vector3(), direzioneRay = new THREE.Vector3();
@@ -410,19 +436,42 @@ function initVR() {
     }
   }
 
-  vrRenderer.setAnimationLoop(() => {
+  vrRenderer.setAnimationLoop((timestamp, frame) => {
     const delta = vrClock.getDelta();
     if (vrMixer) vrMixer.update(delta);
 
     const session = vrRenderer.xr.getSession();
     if (session) {
+      // hit-test: individua il pavimento reale finché l'impianto non è stato piazzato
+      if (frame && !modelloPiazzato) {
+        const refSpace = vrRenderer.xr.getReferenceSpace();
+        if (!hitTestSourceRichiesto) {
+          hitTestSourceRichiesto = true;
+          session.requestReferenceSpace('viewer').then(rs => {
+            session.requestHitTestSource({ space: rs }).then(source => { hitTestSource = source; });
+          });
+          session.addEventListener('end', () => { hitTestSourceRichiesto = false; hitTestSource = null; });
+        }
+        if (hitTestSource) {
+          const risultati = frame.getHitTestResults(hitTestSource);
+          if (risultati.length) {
+            reticolo.visible = true;
+            reticolo.matrix.fromArray(risultati[0].getPose(refSpace).transform.matrix);
+          } else {
+            reticolo.visible = false;
+          }
+        }
+      } else if (reticolo.visible) {
+        reticolo.visible = false;
+      }
+
       let padSx = null, padDx = null;
       for (const source of session.inputSources) {
         if (source.handedness === 'left' && source.gamepad) padSx = source.gamepad;
         if (source.handedness === 'right' && source.gamepad) padDx = source.gamepad;
       }
 
-      // joystick sinistro: cammina nello spazio virtuale
+      // joystick sinistro: cammina (utile per allontanarsi/avvicinarsi a un impianto grande)
       if (padSx && padSx.axes.length >= 4) {
         const x = padSx.axes[2], y = padSx.axes[3];
         if (Math.abs(x) > 0.15 || Math.abs(y) > 0.15) {
@@ -446,10 +495,10 @@ function initVR() {
         prevSx.trigger = trigger; prevSx.grip = grip; prevSx.stick = stick;
       }
 
-      // impugnatura destra (grip, bottone indice 1): afferra, sposta e ruota l'impianto
+      // impugnatura destra (grip): afferra, sposta e ruota l'impianto già piazzato
       const controllerDestro = getController('right');
       const grilletto = padDx && padDx.buttons[1] && padDx.buttons[1].pressed;
-      if (controllerDestro && grilletto) {
+      if (controllerDestro && grilletto && modelloPiazzato) {
         const cp = new THREE.Vector3(); controllerDestro.getWorldPosition(cp);
         const cq = new THREE.Quaternion(); controllerDestro.getWorldQuaternion(cq);
         if (!sto_afferrando) {
@@ -461,8 +510,14 @@ function initVR() {
         } else {
           const deltaQuat = cq.clone().multiply(presa.controllerQuat.clone().invert());
           const offset = presa.modelPos.clone().sub(presa.controllerPos).applyQuaternion(deltaQuat);
-          vrModelGroup.position.copy(cp.clone().add(offset));
-          vrModelGroup.quaternion.copy(deltaQuat.clone().multiply(presa.modelQuat));
+          const nuovaPos = cp.clone().add(offset);
+          nuovaPos.y = 0; // ancorato al pavimento: non può mai sollevarsi da terra
+          vrModelGroup.position.copy(nuovaPos);
+
+          // solo rotazione orizzontale (imbardata): niente inclinazioni o ribaltamenti
+          const quatCompleto = deltaQuat.clone().multiply(presa.modelQuat);
+          const eulerCompleto = new THREE.Euler().setFromQuaternion(quatCompleto, 'YXZ');
+          vrModelGroup.quaternion.setFromEuler(new THREE.Euler(0, eulerCompleto.y, 0));
         }
       } else {
         sto_afferrando = false;
@@ -480,10 +535,9 @@ function initVR() {
         applicaHoverVR(null);
       }
 
-      // clic sul joystick destro: riporta l'impianto davanti a sé (utile se ci si perde)
+      // clic sul joystick destro: sblocca il piazzamento per riposizionare l'impianto altrove
       if (padDx && padDx.buttons[3] && padDx.buttons[3].pressed) {
-        vrModelGroup.position.set(vrDolly.position.x, 0, vrDolly.position.z - 4.5);
-        vrModelGroup.quaternion.identity();
+        modelloPiazzato = false;
       }
     }
     vrRenderer.render(vrScene, vrCamera);
@@ -505,6 +559,10 @@ async function apriVR(imp) {
   while (vrModelGroup.children.length) vrModelGroup.remove(vrModelGroup.children[0]);
   vrMixer = null; vrAction = null;
   vrPareti = []; vrPareteAttiva = null;
+  modelloPiazzato = false;
+  hitTestSource = null; hitTestSourceRichiesto = false;
+  vrModelGroup.position.set(0, 0, 0);
+  vrModelGroup.quaternion.identity();
 
   const loader = new GLTFLoader();
   let gltf;
@@ -537,16 +595,27 @@ async function apriVR(imp) {
   });
 
   vrOverlay.classList.add('attiva');
-  vrDolly.position.set(0, 0, 4.5); // punto di partenza: qualche metro di fronte all'impianto
+  vrDolly.position.set(0, 0, 0);
 
   try {
-    const session = await navigator.xr.requestSession('immersive-vr', {
-      optionalFeatures: ['local-floor', 'bounded-floor']
+    // immersive-ar con hit-test: mostra la VOSTRA stanza vera (passthrough) e permette
+    // di appoggiare l'impianto sul pavimento reale, esattamente come l'AR da telefono
+    const session = await navigator.xr.requestSession('immersive-ar', {
+      requiredFeatures: ['hit-test'],
+      optionalFeatures: ['local-floor', 'dom-overlay'],
+      domOverlay: { root: vrOverlay }
     });
     session.addEventListener('end', () => vrOverlay.classList.remove('attiva'));
     await vrRenderer.xr.setSession(session);
+
+    // se il visore non offre passthrough reale (ambiente completamente virtuale),
+    // mostro almeno un pavimento e una griglia di riferimento come ripiego
+    const opaco = session.environmentBlendMode === 'opaque';
+    pavimentoVirtuale.visible = opaco;
+    grigliaVirtuale.visible = opaco;
+    if (opaco) { modelloPiazzato = true; vrModelGroup.position.set(0, 0, -4.5); }
   } catch (e) {
-    alert('Non è stato possibile avviare la sessione VR su questo dispositivo.');
+    alert('Non è stato possibile avviare la sessione AR su questo dispositivo.');
     vrOverlay.classList.remove('attiva');
   }
 }
@@ -557,13 +626,13 @@ document.getElementById('btnChiudiVR').addEventListener('click', () => {
   vrOverlay.classList.remove('attiva');
 });
 
-// il bottone "Visualizza in VR" compare solo sui dispositivi che supportano la VR immersiva
+// il bottone "Visualizza in VR" compare solo sui dispositivi che supportano l'AR immersiva col visore
 (async () => {
   if (navigator.xr) {
     try {
-      const supportato = await navigator.xr.isSessionSupported('immersive-vr');
+      const supportato = await navigator.xr.isSessionSupported('immersive-ar');
       if (supportato) document.body.classList.add('vr-supported');
-    } catch (e) { /* nessun supporto VR: il bottone resta nascosto */ }
+    } catch (e) { /* nessun supporto: il bottone resta nascosto */ }
   }
 })();
 
