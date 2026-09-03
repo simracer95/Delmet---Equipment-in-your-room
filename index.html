@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Delmet Plant in Your Room</title>
 <script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.184.0/build/three.module.js",
+    "three/addons/loaders/GLTFLoader.js": "https://unpkg.com/three@0.184.0/examples/jsm/loaders/GLTFLoader.js"
+  }
+}
+</script>
 <style>
   * { box-sizing: border-box; }
   html, body { margin: 0; min-height: 100%; background: #0d1114; font-family: 'Segoe UI', Arial, sans-serif; }
@@ -63,6 +71,53 @@
     display: flex; align-items: center; justify-content: center; text-align: center;
     padding: 30px; font-size: 14px; line-height: 1.6;
   }
+
+  /* -------- bottone VR (visibile solo se il dispositivo lo supporta) -------- */
+  #btnVR {
+    display: none; position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+    z-index: 4; background: #1f2a3a; border: 1px solid #4a5a70; color: #fff;
+    border-radius: 24px; padding: 10px 20px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  body.vr-supported #btnVR { display: block; }
+  #suggerimentoVR {
+    display: none; position: fixed; bottom: 58px; left: 0; right: 0; z-index: 4;
+    text-align: center; color: #9aa5b1; font-size: 11px; padding: 0 16px; line-height: 1.4;
+  }
+  body.vr-supported #suggerimentoVR { display: block; }
+
+  /* -------- controlli animazione (solo se il modello ne ha una) -------- */
+  #barraAnim {
+    display: none; position: absolute; bottom: 108px; left: 16px; right: 16px; z-index: 4;
+    background: #111826dd; border: 1px solid #364154; border-radius: 12px;
+    padding: 10px 12px; align-items: center; gap: 10px;
+  }
+  #barraAnim.attiva { display: flex; }
+  #barraAnim button {
+    background: #1f2a3a; border: 1px solid #4a5a70; color: #fff; border-radius: 8px;
+    width: 36px; height: 36px; font-size: 15px; cursor: pointer; flex: none;
+  }
+  #barraAnim input[type=range] { flex: 1; accent-color: #00A0DC; }
+
+  /* -------- bottone parete vasca (solo se il modello ne ha una) -------- */
+  #btnParete {
+    display: none; position: absolute; top: 64px; right: 14px; z-index: 4;
+    background: #1f2a3aee; border: 1px solid #4a5a70; color: #fff; border-radius: 20px;
+    padding: 8px 14px; font-size: 12px; cursor: pointer;
+  }
+  #btnParete.attiva { display: block; }
+  #btnParete.on { background: #00A0DCee; border-color: #00A0DC; }
+
+  /* -------- vista VR a schermo intero -------- */
+  #vrOverlay {
+    position: fixed; inset: 0; z-index: 30; display: none; background: #000;
+  }
+  #vrOverlay.attiva { display: block; }
+  #vrOverlay canvas { display: block; }
+  #vrOverlay .chiudiVR {
+    position: absolute; top: 16px; right: 16px; z-index: 2;
+    background: #1f2a3aee; border: 1px solid #4a5a70; color: #fff;
+    border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer;
+  }
 </style>
 </head>
 <body>
@@ -107,6 +162,26 @@
       Visualizza nella tua officina
     </button>
   </model-viewer>
+
+  <button id="btnVR">Visualizza in VR</button>
+  <div id="suggerimentoVR">
+    Joystick sinistro: cammina · Impugnatura destra: afferra/sposta/ruota l'impianto · Punta col controller destro una parete vasca per vederci dentro
+    <br>Grilletto sinistro: animazione avanti · Impugnatura sinistra: animazione indietro · Click joystick sinistro: pausa
+  </div>
+
+  <button id="btnParete">👁 Mostra interno vasca</button>
+
+  <div id="barraAnim">
+    <button id="btnIndietroAnim" title="Indietro">◀</button>
+    <button id="btnPausaAnim" title="Pausa/Riprendi">⏸</button>
+    <button id="btnAvantiAnim" title="Avanti">▶</button>
+    <input type="range" id="cursoreAnim" min="0" max="100" value="0">
+  </div>
+</div>
+
+<!-- ============================= VISTA VR (headset) ======================= -->
+<div id="vrOverlay">
+  <button class="chiudiVR" id="btnChiudiVR">✕ Esci dalla VR</button>
 </div>
 
 <script>
@@ -129,6 +204,7 @@
   const vista = document.getElementById('vista');
   const mv = document.getElementById('mv');
   const vTitolo = document.getElementById('vTitolo');
+  let impCorrente = null;
 
   IMPIANTI.forEach(imp => {
     const nome = imp.id.toLowerCase();
@@ -160,6 +236,7 @@
   });
 
   function apriAR(imp) {
+    impCorrente = imp;
     const nome = imp.id.toLowerCase();
     mv.src = 'assets/' + nome + '.glb';
     mv.iosSrc = 'assets/' + nome + '.usdz';
@@ -178,11 +255,319 @@
     mv.addEventListener('error', gestisciErrore, { once: true });
   }
 
+  document.getElementById('btnVR').addEventListener('click', () => {
+    if (impCorrente && window.apriVR) window.apriVR(impCorrente);
+  });
+
+  /* -------------------- controlli animazione (avanti/pausa/indietro) -------------------- */
+  const barraAnim = document.getElementById('barraAnim');
+  const btnPausaAnim = document.getElementById('btnPausaAnim');
+  const btnAvantiAnim = document.getElementById('btnAvantiAnim');
+  const btnIndietroAnim = document.getElementById('btnIndietroAnim');
+  const cursoreAnim = document.getElementById('cursoreAnim');
+  let trascinandoCursore = false;
+
+  function aggiornaIconaPausa() {
+    btnPausaAnim.textContent = mv.paused ? '▶' : '⏸';
+  }
+  btnPausaAnim.addEventListener('click', () => {
+    if (mv.paused) { mv.timeScale = Math.sign(mv.timeScale) || 1; mv.play(); } else mv.pause();
+    aggiornaIconaPausa();
+  });
+  btnAvantiAnim.addEventListener('click', () => { mv.timeScale = 1; mv.play(); aggiornaIconaPausa(); });
+  btnIndietroAnim.addEventListener('click', () => { mv.timeScale = -1; mv.play(); aggiornaIconaPausa(); });
+  cursoreAnim.addEventListener('input', () => {
+    if (!mv.duration) return;
+    trascinandoCursore = true;
+    mv.pause();
+    mv.currentTime = (cursoreAnim.value / 100) * mv.duration;
+    aggiornaIconaPausa();
+  });
+  cursoreAnim.addEventListener('change', () => { trascinandoCursore = false; });
+  setInterval(() => {
+    if (!barraAnim.classList.contains('attiva') || trascinandoCursore || !mv.duration) return;
+    cursoreAnim.value = (mv.currentTime / mv.duration) * 100;
+  }, 120);
+
+  /* -------------------- pareti vasca a scomparsa (tocco per mostrare l'interno) -------------------- */
+  const btnParete = document.getElementById('btnParete');
+  const RE_PARETE = /^(OY-vasca-parete-fronte|TP-vasca-\d+-lato-\d|TP-serbatoio-lato-\d|SH-vasca-[a-z]+-parete-[ab])$/;
+  let paretiVasca = [];
+  btnParete.addEventListener('click', () => {
+    const on = !btnParete.classList.contains('on');
+    btnParete.classList.toggle('on', on);
+    paretiVasca.forEach(w => {
+      w.material.setAlphaMode(on ? 'BLEND' : 'OPAQUE');
+      w.material.pbrMetallicRoughness.setBaseColorFactor([...w.rgb, on ? 0.22 : w.alpha]);
+    });
+  });
+
+  // ogni volta che un nuovo modello finisce di caricare, controllo cosa offre
+  mv.addEventListener('load', () => {
+    const haAnim = mv.availableAnimations && mv.availableAnimations.length > 0;
+    barraAnim.classList.toggle('attiva', haAnim);
+    if (haAnim) { mv.pause(); mv.currentTime = 0; aggiornaIconaPausa(); }
+
+    const materiali = (mv.model && mv.model.materials) || [];
+    paretiVasca = materiali.filter(m => RE_PARETE.test(m.name)).map(m => {
+      const base = m.pbrMetallicRoughness.baseColorFactor;
+      return { material: m, rgb: base.slice(0, 3), alpha: base[3] };
+    });
+    btnParete.classList.toggle('attiva', paretiVasca.length > 0);
+    btnParete.classList.remove('on');
+  });
+
   document.getElementById('btnIndietro').addEventListener('click', () => {
     vista.classList.remove('attiva');
     selettore.style.display = 'block';
     vista.querySelectorAll('.avviso').forEach(a => a.remove());
   });
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const vrOverlay = document.getElementById('vrOverlay');
+let vrScene, vrCamera, vrRenderer, vrModelGroup, vrDolly, vrReady = false;
+let vrMixer = null, vrAction = null;
+const vrClock = new THREE.Clock();
+const RE_PARETE_VR = /^(OY-vasca-parete-fronte|TP-vasca-\d+-lato-\d|TP-serbatoio-lato-\d|SH-vasca-[a-z]+-parete-[ab])$/;
+let vrPareti = [], vrPareteAttiva = null;
+
+function initVR() {
+  if (vrReady) return;
+
+  vrScene = new THREE.Scene();
+  vrCamera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 60);
+
+  vrRenderer = new THREE.WebGLRenderer({ antialias: true });
+  vrRenderer.setPixelRatio(window.devicePixelRatio);
+  vrRenderer.setSize(window.innerWidth, window.innerHeight);
+  vrRenderer.xr.enabled = true;
+  vrOverlay.appendChild(vrRenderer.domElement);
+
+  vrScene.add(new THREE.HemisphereLight(0xffffff, 0x555045, 1.3));
+  const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+  dirLight.position.set(3, 6, 2);
+  vrScene.add(dirLight);
+
+  // pavimento di riferimento, per capire dove si trova l'impianto nello spazio virtuale
+  const pavimento = new THREE.Mesh(
+    new THREE.PlaneGeometry(50, 50),
+    new THREE.MeshStandardMaterial({ color: 0x1a2028, roughness: 1 })
+  );
+  pavimento.rotation.x = -Math.PI / 2;
+  vrScene.add(pavimento);
+  vrScene.add(new THREE.GridHelper(50, 50, 0x3d4a5c, 0x232b36));
+
+  vrModelGroup = new THREE.Group();
+  vrScene.add(vrModelGroup);
+
+  // dolly: il "corpo" dell'utente in VR, spostabile col joystick sinistro
+  vrDolly = new THREE.Group();
+  vrDolly.add(vrCamera);
+  vrScene.add(vrDolly);
+
+  const controllerDx = vrRenderer.xr.getController(0);
+  const controllerSx = vrRenderer.xr.getController(1);
+  [controllerDx, controllerSx].forEach(c => {
+    c.addEventListener('connected', (e) => { c.userData.handedness = e.data.handedness; });
+    c.addEventListener('disconnected', () => { c.userData.handedness = null; });
+  });
+  vrDolly.add(controllerDx, controllerSx);
+
+  function getController(hand) {
+    return [controllerDx, controllerSx].find(c => c.userData.handedness === hand) || null;
+  }
+
+  // stato per "afferrare" l'impianto con la mano destra (grip)
+  let sto_afferrando = false;
+  const presa = {
+    controllerPos: new THREE.Vector3(), controllerQuat: new THREE.Quaternion(),
+    modelPos: new THREE.Vector3(), modelQuat: new THREE.Quaternion(),
+  };
+
+  // stato precedente dei pulsanti sinistri, per rilevare "appena premuto" (fronte di salita)
+  const prevSx = { trigger: false, grip: false, stick: false };
+  const rayVR = new THREE.Raycaster();
+  const origineRay = new THREE.Vector3(), direzioneRay = new THREE.Vector3();
+
+  function applicaHoverVR(mesh) {
+    if (mesh === vrPareteAttiva) return;
+    if (vrPareteAttiva) {
+      vrPareteAttiva.material.transparent = vrPareteAttiva.userData.trBase;
+      vrPareteAttiva.material.opacity = vrPareteAttiva.userData.opBase;
+      vrPareteAttiva.material.depthWrite = vrPareteAttiva.userData.dwBase;
+      vrPareteAttiva.material.needsUpdate = true;
+    }
+    vrPareteAttiva = mesh;
+    if (mesh) {
+      mesh.material.transparent = true;
+      mesh.material.opacity = .22;
+      mesh.material.depthWrite = false;
+      mesh.material.needsUpdate = true;
+    }
+  }
+
+  vrRenderer.setAnimationLoop(() => {
+    const delta = vrClock.getDelta();
+    if (vrMixer) vrMixer.update(delta);
+
+    const session = vrRenderer.xr.getSession();
+    if (session) {
+      let padSx = null, padDx = null;
+      for (const source of session.inputSources) {
+        if (source.handedness === 'left' && source.gamepad) padSx = source.gamepad;
+        if (source.handedness === 'right' && source.gamepad) padDx = source.gamepad;
+      }
+
+      // joystick sinistro: cammina nello spazio virtuale
+      if (padSx && padSx.axes.length >= 4) {
+        const x = padSx.axes[2], y = padSx.axes[3];
+        if (Math.abs(x) > 0.15 || Math.abs(y) > 0.15) {
+          const avanti = new THREE.Vector3();
+          vrCamera.getWorldDirection(avanti);
+          avanti.y = 0; avanti.normalize();
+          const destra = new THREE.Vector3().crossVectors(avanti, new THREE.Vector3(0, 1, 0)).negate();
+          vrDolly.position.addScaledVector(avanti, -y * 0.06);
+          vrDolly.position.addScaledVector(destra, x * 0.06);
+        }
+      }
+
+      // pulsanti sinistri: comandano l'animazione dell'impianto (se presente)
+      if (padSx && vrAction) {
+        const trigger = !!(padSx.buttons[0] && padSx.buttons[0].pressed);
+        const grip = !!(padSx.buttons[1] && padSx.buttons[1].pressed);
+        const stick = !!(padSx.buttons[3] && padSx.buttons[3].pressed);
+        if (trigger && !prevSx.trigger) { vrAction.paused = false; vrAction.timeScale = 1; }
+        if (grip && !prevSx.grip) { vrAction.paused = false; vrAction.timeScale = -1; }
+        if (stick && !prevSx.stick) { vrAction.paused = !vrAction.paused; }
+        prevSx.trigger = trigger; prevSx.grip = grip; prevSx.stick = stick;
+      }
+
+      // impugnatura destra (grip, bottone indice 1): afferra, sposta e ruota l'impianto
+      const controllerDestro = getController('right');
+      const grilletto = padDx && padDx.buttons[1] && padDx.buttons[1].pressed;
+      if (controllerDestro && grilletto) {
+        const cp = new THREE.Vector3(); controllerDestro.getWorldPosition(cp);
+        const cq = new THREE.Quaternion(); controllerDestro.getWorldQuaternion(cq);
+        if (!sto_afferrando) {
+          sto_afferrando = true;
+          presa.controllerPos.copy(cp);
+          presa.controllerQuat.copy(cq);
+          presa.modelPos.copy(vrModelGroup.position);
+          presa.modelQuat.copy(vrModelGroup.quaternion);
+        } else {
+          const deltaQuat = cq.clone().multiply(presa.controllerQuat.clone().invert());
+          const offset = presa.modelPos.clone().sub(presa.controllerPos).applyQuaternion(deltaQuat);
+          vrModelGroup.position.copy(cp.clone().add(offset));
+          vrModelGroup.quaternion.copy(deltaQuat.clone().multiply(presa.modelQuat));
+        }
+      } else {
+        sto_afferrando = false;
+      }
+
+      // puntamento col controller destro (quando non si sta afferrando): pareti vasca a scomparsa
+      if (controllerDestro && !grilletto && vrPareti.length) {
+        origineRay.setFromMatrixPosition(controllerDestro.matrixWorld);
+        direzioneRay.set(0, 0, -1).transformDirection(controllerDestro.matrixWorld);
+        rayVR.set(origineRay, direzioneRay);
+        rayVR.far = 8;
+        const hit = rayVR.intersectObjects(vrPareti, false)[0];
+        applicaHoverVR(hit ? hit.object : null);
+      } else {
+        applicaHoverVR(null);
+      }
+
+      // clic sul joystick destro: riporta l'impianto davanti a sé (utile se ci si perde)
+      if (padDx && padDx.buttons[3] && padDx.buttons[3].pressed) {
+        vrModelGroup.position.set(vrDolly.position.x, 0, vrDolly.position.z - 4.5);
+        vrModelGroup.quaternion.identity();
+      }
+    }
+    vrRenderer.render(vrScene, vrCamera);
+  });
+
+  window.addEventListener('resize', () => {
+    vrCamera.aspect = window.innerWidth / window.innerHeight;
+    vrCamera.updateProjectionMatrix();
+    vrRenderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  vrReady = true;
+}
+
+async function apriVR(imp) {
+  initVR();
+  const nome = imp.id.toLowerCase();
+
+  while (vrModelGroup.children.length) vrModelGroup.remove(vrModelGroup.children[0]);
+  vrMixer = null; vrAction = null;
+  vrPareti = []; vrPareteAttiva = null;
+
+  const loader = new GLTFLoader();
+  let gltf;
+  try {
+    gltf = await loader.loadAsync('assets/' + nome + '.glb');
+  } catch (e) {
+    alert('Il modello 3D di "' + imp.code + '" non è ancora presente in assets/' + nome + '.glb');
+    return;
+  }
+  vrModelGroup.add(gltf.scene);
+
+  // animazione (se presente): pronta e in pausa, la comandano i pulsanti sinistri
+  if (gltf.animations && gltf.animations.length) {
+    vrMixer = new THREE.AnimationMixer(gltf.scene);
+    vrAction = vrMixer.clipAction(gltf.animations[0]);
+    vrAction.clampWhenFinished = true;
+    vrAction.setLoop(THREE.LoopOnce);
+    vrAction.play();
+    vrAction.paused = true;
+  }
+
+  // pareti vasca: individuo le mesh il cui nome corrisponde a quelle "a scomparsa" dello Showroom
+  gltf.scene.traverse(o => {
+    if (!o.isMesh || !RE_PARETE_VR.test(o.name)) return;
+    o.material = o.material.clone();
+    o.userData.opBase = o.material.opacity;
+    o.userData.trBase = o.material.transparent;
+    o.userData.dwBase = o.material.depthWrite;
+    vrPareti.push(o);
+  });
+
+  vrOverlay.classList.add('attiva');
+  vrDolly.position.set(0, 0, 4.5); // punto di partenza: qualche metro di fronte all'impianto
+
+  try {
+    const session = await navigator.xr.requestSession('immersive-vr', {
+      optionalFeatures: ['local-floor', 'bounded-floor']
+    });
+    session.addEventListener('end', () => vrOverlay.classList.remove('attiva'));
+    await vrRenderer.xr.setSession(session);
+  } catch (e) {
+    alert('Non è stato possibile avviare la sessione VR su questo dispositivo.');
+    vrOverlay.classList.remove('attiva');
+  }
+}
+
+document.getElementById('btnChiudiVR').addEventListener('click', () => {
+  const session = vrRenderer && vrRenderer.xr.getSession();
+  if (session) session.end();
+  vrOverlay.classList.remove('attiva');
+});
+
+// il bottone "Visualizza in VR" compare solo sui dispositivi che supportano la VR immersiva
+(async () => {
+  if (navigator.xr) {
+    try {
+      const supportato = await navigator.xr.isSessionSupported('immersive-vr');
+      if (supportato) document.body.classList.add('vr-supported');
+    } catch (e) { /* nessun supporto VR: il bottone resta nascosto */ }
+  }
+})();
+
+window.apriVR = apriVR;
 </script>
 
 </body>

@@ -3949,9 +3949,52 @@ PLANTS.forEach((p, i) => {
    dello showroom. Esporta il gruppo 3D "pulito" (coordinate locali, senza
    la traslazione/rotazione di scena) come .glb, pronto per essere convertito
    in .usdz e usato con <model-viewer> in AR. */
+
+/* Cattura in un'animazione vera e propria (esportabile in glTF) il ciclo
+   carrello-dentro / serranda-chiusa della Poseidon, replicando le stesse
+   curve di movimento usate dal vivo nello Showroom (animaPO). Il resto
+   dell'effetto (spruzzi, nebbia, logo che si accende) resta nello Showroom
+   dal vivo: non sono animabili in modo affidabile in glTF. */
+function bakeAnimazionePoseidon() {
+  const tracce = [];
+  const DURATA = 5; // secondi, stesso ritmo di animaPO() (dt/5.0)
+  const CAMPIONI = 40;
+
+  const c = PO_ANIM.carrello, tap = PO_ANIM.tapparella;
+  if (c && c.userData.out !== undefined) {
+    const tempi = [], valori = [];
+    for (let i = 0; i <= CAMPIONI; i++) {
+      const e = i / CAMPIONI;
+      const kc = Math.min(1, e / .55), sc = kc * kc * (3 - 2 * kc);
+      tempi.push(e * DURATA);
+      valori.push(c.userData.out + (c.userData.in - c.userData.out) * sc, c.position.y, c.position.z);
+    }
+    tracce.push(new THREE.VectorKeyframeTrack(c.name + '.position', tempi, valori));
+  }
+  if (tap) {
+    const tempi = [], valori = [];
+    const sx0 = tap.scale.x, sz0 = tap.scale.z;
+    for (let i = 0; i <= CAMPIONI; i++) {
+      const e = i / CAMPIONI;
+      const kt = Math.max(0, Math.min(1, (e - .58) / .35));
+      const sy = .1 + .9 * (kt * kt * (3 - 2 * kt));
+      tempi.push(e * DURATA);
+      valori.push(sx0, sy, sz0);
+    }
+    tracce.push(new THREE.VectorKeyframeTrack(tap.name + '.scale', tempi, valori));
+  }
+  if (!tracce.length) return null;
+  return new THREE.AnimationClip('CicloLavaggio', DURATA, tracce);
+}
+
 function esportaGLB(id) {
   const grp = MODELLI[id];
   if (!grp) { console.warn('Modello non trovato:', id); return; }
+  const opzioni = { binary: true, onlyVisible: true, truncateDrawRange: true };
+  if (id === 'POSEIDON') {
+    const clip = bakeAnimazionePoseidon();
+    if (clip) opzioni.animations = [clip];
+  }
   const exporter = new GLTFExporter();
   exporter.parse(
     grp,
@@ -3964,7 +4007,7 @@ function esportaGLB(id) {
       URL.revokeObjectURL(url);
     },
     (err) => console.error('Errore export GLTF', err),
-    { binary: true, onlyVisible: true, truncateDrawRange: true }
+    opzioni
   );
 }
 
